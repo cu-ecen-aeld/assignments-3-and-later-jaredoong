@@ -1,4 +1,9 @@
 #include "systemcalls.h"
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <string.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -17,7 +22,11 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 
-    return true;
+  int able = system(cmd);
+  if (able == -1) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -45,9 +54,6 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
 /*
  * TODO:
@@ -59,9 +65,27 @@ bool do_exec(int count, ...)
  *
 */
 
-    va_end(args);
+    int pid = fork();
+    if (pid == -1) {
+      perror("fork");
+      return false;
+    }
+    if (pid == 0) {
+      execv(command[0], command);
+      perror("execv");
+      exit(1); // If execv runs correctly, will not reach here
+    }
 
-    return true;
+    int w_status;
+    if (wait(&w_status) == -1) {
+      return false;
+    }
+    if (WIFEXITED(w_status) && WEXITSTATUS(w_status) == 0) {
+      return true;
+    }
+
+    va_end(args);
+    return false;
 }
 
 /**
@@ -92,8 +116,40 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd < 0) {
+      perror("open");
+      return false;
+    }
+    int pid = fork();
+    if (pid == -1) {
+      perror("fork");
+      close(fd);
+      return false;
+    } else if (pid == 0) {
+      if (dup2(fd, 1) < 0) {
+        perror("dup2");
+        close(fd);
+        return false;
+      }
+      execvp(command[0], command);
+      perror("execvp");
+      close(fd); // not supposed to reach here if execv is successful
+      exit(1);
+    }
 
+    int w_status;
+    if (wait(&w_status) == -1) {
+      close(fd);
+      return false;
+    }
+
+    if (WIFEXITED(w_status) && WEXITSTATUS(w_status) == 0) {
+      close(fd);
+      return true;
+    }
+
+    close(fd);
     va_end(args);
-
-    return true;
+    return false;
 }
